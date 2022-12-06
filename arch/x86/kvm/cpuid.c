@@ -32,6 +32,11 @@
  */
 u32 kvm_cpu_caps[NR_KVM_CPU_CAPS] __read_mostly;
 EXPORT_SYMBOL_GPL(kvm_cpu_caps);
+atomic_t total_exits_counter = ATOMIC_INIT(0);
+EXPORT_SYMBOL(total_exits_counter);
+atomic64_t total_cup_cycles_counter = ATOMIC64_INIT(0);
+EXPORT_SYMBOL(total_cup_cycles_counter);
+
 
 u32 xstate_required_size(u64 xstate_bv, bool compacted)
 {
@@ -1502,7 +1507,29 @@ int kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 
 	eax = kvm_rax_read(vcpu);
 	ecx = kvm_rcx_read(vcpu);
-	kvm_cpuid(vcpu, &eax, &ebx, &ecx, &edx, false);
+	switch(eax) {
+		// case %eax = 0x4FFFFFFC
+		case 0x4FFFFFFC:
+			eax = arch_atomic_read(&total_exits_counter);
+			//printk(KERN_INFO "### Total Exits in EAX = %u", eax);
+			break;
+
+		// case %eax = 0x4FFFFFFD
+		case 0x4FFFFFFD:
+			//the high 32 bits of the total time spent processing all exits store in %ebx
+			ebx = (atomic64_read(&total_cup_cycles_counter) >> 32);;
+			//the low 32 bits of the total time spent processing all exits store in %ecx
+			ecx = (atomic64_read(&total_cup_cycles_counter) & 0xFFFFFFFF);
+
+			//printk(KERN_INFO "### Total CPU Exit Cycle Time(hi) in EBX = %u", ebx);
+			//printk(KERN_INFO "### Total CPU Exit Cycle Time(lo) in ECX = %u", ecx);
+			break;
+
+		// default case for all other %eax value
+		default:
+			kvm_cpuid(vcpu, &eax, &ebx, &ecx, &edx, false);
+	}
+	
 	kvm_rax_write(vcpu, eax);
 	kvm_rbx_write(vcpu, ebx);
 	kvm_rcx_write(vcpu, ecx);
